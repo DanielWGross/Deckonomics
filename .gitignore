@@ -1,6 +1,6 @@
 deckonomics_data/
 deckonomics_logs/
-generated/prisma/
+generated/
 # Logs
 logs
 *.log
