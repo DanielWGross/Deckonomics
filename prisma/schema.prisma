@@ -1,0 +1,79 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Rarity {
+  C // Common
+  L // Land
+  M // Mythic
+  P // Promo
+  R // Rare
+  S // Special
+  T // Token
+  U // Uncommon
+}
+
+enum Condition {
+  NM // Near Mint
+  LP // Lightly Played
+  MP // Moderately Played
+  HP // Heavily Played
+  DM // Damaged
+}
+
+enum Printing {
+  NORMAL
+  FOIL
+}
+
+model Set {
+  id             Int      @id @default(autoincrement())
+  groupId        Int      @unique
+  name           String
+  abbreviation   String
+  isSupplemental Boolean
+  publishedOn    DateTime
+  modifiedOn     DateTime
+  categoryId     Int
+  cards          Card[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Card {
+  id          Int         @id @default(autoincrement())
+  tcgPlayerId Int         @unique
+  set         Set         @relation(fields: [setId], references: [id])
+  setId       Int
+  productName String
+  productId   Int
+  productUrl  String
+  number      Int
+  rarity      Rarity
+  condition   Condition
+  printing    Printing
+  sales       CardSales[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+model CardSales {
+  id                 Int      @id @default(autoincrement())
+  card               Card     @relation(fields: [cardId], references: [id])
+  cardId             Int
+  date               DateTime @default(now())
+  averageDailySold   Float
+  totalSold          Int
+  highestSalePrice   Float
+  highestSalePrice7d Float
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([cardId, date])
+}
