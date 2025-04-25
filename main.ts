@@ -180,7 +180,7 @@ async function addCardsToDatabase(set: TCGCSV.Set): Promise<void> {
 
     if (confirmDelete) {
         try {
-            await fs.unlink(`./data/${set.abbreviation.toLowerCase()}.csv`);
+            await fs.unlink(`./deckonomics_data/${set.abbreviation.toLowerCase()}.csv`);
             printMessage(`Deleted ${set.abbreviation.toLowerCase()}.csv`, 'green');
         } catch (error) {
             throw new Error('Error deleting file:');
