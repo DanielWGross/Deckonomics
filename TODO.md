@@ -1,3 +1,8 @@
+## Update List Sets to only return Sets in the Database
+  - When using the `List Sets` option we should only return sets that exist in the database
+  - For now, it should probably just return the `Selected Group Details` info and then return back to the main menu 
+  - This probably has some overlap with add logic below
+
 ## Add logic to validate a set in the Database
   - The call to `https://tcgcsv.com/tcgplayer/1/groups` returns a `modifiedOn` property that indicates if a set has changed.
   - If the `modifiedOn` date in the Set table is behind the `modifiedOn` from the TCGCSV response we should update
