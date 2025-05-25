@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { Set } from '../generated/prisma';
+import type { Card, Set } from '../generated/prisma';
 import { PrismaClient } from '../generated/prisma';
 import { TCGCSV } from '../types/tcgcsv';
 import { printError, printMessage } from './displayUtils';
@@ -22,6 +22,14 @@ function logErrorToFile(error: any, context: string): void {
 }
 
 export const db = prisma;
+
+export async function getAllCardsBySetId(setId: number): Promise<Card[]> {
+    return prisma.card.findMany({
+        where: {
+            setId,
+        },
+    });
+}
 
 export async function getAllSets(): Promise<Set[]> {
     return prisma.set.findMany({

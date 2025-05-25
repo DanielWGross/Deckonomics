@@ -23,7 +23,9 @@
         "fuzzy-search": "^3.2.1",
         "inquirer": "^12.5.2",
         "inquirer-autocomplete-standalone": "^0.8.1",
-        "prisma": "^6.6.0"
+        "prisma": "^6.6.0",
+        "puppeteer": "^24.9.0",
+        "puppeteer-cluster": "^0.24.0"
     },
     "devDependencies": {
         "@types/fuzzy-search": "^2.1.5",

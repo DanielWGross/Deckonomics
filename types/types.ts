@@ -18,6 +18,7 @@ export const MenuOption = {
     ListSets: 'List Sets',
     GenerateSetData: 'Generate Set Data',
     GenerateSetPrices: 'Generate Set Prices',
+    FetchSetPrices: 'Fetch Set Prices',
 } as const;
 
 export type MenuOption = (typeof MenuOption)[keyof typeof MenuOption];

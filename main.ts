@@ -6,8 +6,15 @@ import { default as autocomplete } from 'inquirer-autocomplete-standalone';
 import { Rarity } from './generated/prisma';
 import { TCGCSV } from './types/tcgcsv';
 import { MenuOption, NewCard } from './types/types';
-import { clearDatabase, createNewCards, createSet, getSetByGroupId } from './utils/db';
+import {
+    clearDatabase,
+    createNewCards,
+    createSet,
+    getAllCardsBySetId,
+    getSetByGroupId,
+} from './utils/db';
 import { formatSet, printError, printMessage, printSetDetails } from './utils/displayUtils';
+import { scrapeSetPrices } from './utils/scraper';
 
 type TCGPlayerCard = {
     'TCGplayer Id': string;
@@ -98,6 +105,7 @@ async function showMainMenu(): Promise<MenuOption> {
                 { name: 'Add Set', value: MenuOption.AddSet },
                 { name: 'Generate Set Data', value: MenuOption.GenerateSetData },
                 { name: 'Generate Set Prices', value: MenuOption.GenerateSetPrices },
+                { name: 'Fetch Set Prices', value: MenuOption.FetchSetPrices },
             ],
         },
     ]);
@@ -188,6 +196,14 @@ async function addCardsToDatabase(set: TCGCSV.Set): Promise<void> {
     }
 }
 
+async function fetchSetPrices() {
+    const allCards = await getAllCardsBySetId(34);
+    // Create an array that just contains the item at index 0 from allCards
+    const cards = [allCards[0]];
+
+    await scrapeSetPrices(cards);
+}
+
 async function listSets(): Promise<void> {
     await clearDatabase();
     // Make a request to the TCGCSV API to get all the sets
@@ -269,6 +285,10 @@ async function main(): Promise<void> {
                 break;
             case MenuOption.GenerateSetPrices:
                 printMessage('\n== Generate Set Prices ==\n');
+                break;
+            case MenuOption.FetchSetPrices:
+                printMessage('\n== Fetch Set Prices ==\n');
+                await fetchSetPrices();
                 break;
             default:
                 printError('Invalid option', 'Invalid option');
