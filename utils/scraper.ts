@@ -2,10 +2,29 @@ import { Card } from '../generated/prisma';
 import { Cluster } from 'puppeteer-cluster';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { createCardSales } from './db';
 
-async function humanDelay(min = 200, max = 800) {
+const MIN_DELAY = 200;
+const MAX_DELAY = 800;
+
+async function humanDelay(min = MIN_DELAY, max = MAX_DELAY) {
     const ms = Math.floor(Math.random() * (max - min + 1)) + min;
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isLatestSalesResponse(response: any, latestSalesEndpoint: string): boolean {
+    const req = response.request();
+    if (req.url() !== latestSalesEndpoint) {
+        return false;
+    }
+
+    try {
+        const postData = JSON.parse(req.postData()!);
+        // We only want the request with limit !== 1 (usually limit of 25)
+        return postData.limit !== 1;
+    } catch {
+        return false;
+    }
 }
 
 export async function scrapeSetPrices(cards: Card[]): Promise<void> {
@@ -21,9 +40,8 @@ export async function scrapeSetPrices(cards: Card[]): Promise<void> {
     });
 
     await cluster.task(async ({ page, data: card }) => {
-        // helper to sleep for a random interval between min and max ms
-
         const cardData: Card = card as unknown as Card;
+        const latestSalesEndpoint = `https://mpapi.tcgplayer.com/v2/product/${cardData.productId}/latestsales?mpfev=3691`;
 
         console.log(
             `🤖 Scraping Card: ${cardData.productName} Condition: ${cardData.condition} Printing: ${cardData.printing}`
@@ -31,39 +49,27 @@ export async function scrapeSetPrices(cards: Card[]): Promise<void> {
         const salesResults: any[] = [];
 
         const salesResponsePromise = page.waitForResponse(
-            (response) => {
-                const req = response.request();
-                // Check specifically for the latest sales endpoint
-                if (
-                    req.url() !==
-                    `https://mpapi.tcgplayer.com/v2/product/478532/latestsales?mpfev=3691`
-                ) {
-                    return false;
-                }
-
-                try {
-                    const postData = JSON.parse(req.postData()!);
-                    // There are two requests that are made to the latest sales endpoint
-                    // We only want the one with limit !== 1
-                    // This is usually limit of 25 but we will keep it flexible
-                    return postData.limit !== 1;
-                } catch {
-                    return false;
-                }
-            },
-            { timeout: 300000 }
+            (response) => isLatestSalesResponse(response, latestSalesEndpoint),
+            { timeout: 30000 }
         );
-        // https://www.tcgplayer.com/product/614328/magic-aetherdrift-aatchik-emerald-radian?Language=English&Condition=Near+Mint&Printing=Normal
-        const url =
-            'https://www.tcgplayer.com/product/478532/magic-phyrexia-all-will-be-one-atraxa-grand-unifier?Printing=Normal&Condition=Near+Mint&Language=English&page=1';
-        // const url = `${cardData.productUrl}?Language=English&Condition=Near+Mint&Printing=Normal`;
+
+        const url = `${cardData.productUrl}?Language=English&Condition=Near+Mint&Printing=Normal`;
         await page.goto(url, { waitUntil: 'networkidle2' });
         const salesResponse = await salesResponsePromise;
         const data = await salesResponse.json();
 
-        data.data.forEach((sale: any) => {
+        const salesData = data.data;
+
+        for (const sale of salesData) {
             salesResults.push(sale);
-        });
+            await createCardSales({
+                orderDate: sale.orderDate,
+                shippingPrice: sale.shippingPrice,
+                purchasePrice: sale.purchasePrice,
+                quantity: sale.quantity,
+                id: cardData.id,
+            });
+        }
 
         await humanDelay(300, 600);
         await page.waitForSelector('div.modal__activator');
@@ -75,9 +81,9 @@ export async function scrapeSetPrices(cards: Card[]): Promise<void> {
                 new Date(oldest.orderDate) < new Date(current.orderDate) ? oldest : current
             );
 
-        // 4️⃣ Set threshold date (30 days ago)
+        // 4️⃣ Set threshold date (7 days ago)
         const threshold = new Date();
-        threshold.setDate(threshold.getDate() - 30);
+        threshold.setDate(threshold.getDate() - 7);
 
         // Compute current oldest
         let oldestRecord = getOldest(salesResults);
@@ -99,7 +105,7 @@ export async function scrapeSetPrices(cards: Card[]): Promise<void> {
                         return false;
                     }
                 },
-                { timeout: 300000 }
+                { timeout: 30000 }
             );
             await humanDelay(300, 600);
             await page.waitForSelector('button.sales-history-snapshot__load-more__button');

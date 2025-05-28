@@ -23,7 +23,20 @@ function logErrorToFile(error: any, context: string): void {
 
 export const db = prisma;
 
-export async function getAllCardsBySetId(setId: number): Promise<Card[]> {
+export async function getAllCardsByGroupId(groupId: number): Promise<Card[]> {
+    const set = await prisma.set.findUnique({
+        where: { groupId },
+        include: { cards: true },
+    });
+
+    if (!set) {
+        return [];
+    }
+
+    return set.cards;
+}
+
+export async function getAllCardsById(setId: number): Promise<Card[]> {
     return prisma.card.findMany({
         where: {
             setId,
@@ -63,6 +76,31 @@ export async function createSet(set: TCGCSV.Set): Promise<Set> {
             categoryId: set.categoryId,
         },
     });
+}
+
+export async function createCardSales(card: any): Promise<any> {
+    try {
+        return await prisma.cardSales.create({
+            data: {
+                orderDate: new Date(card.orderDate),
+                shippingPrice: card.shippingPrice,
+                purchasePrice: card.purchasePrice,
+                quantity: card.quantity,
+                card: {
+                    connect: { id: card.id },
+                },
+            },
+        });
+    } catch (error: any) {
+        // If the error is a unique constraint violation, we'll just skip it
+        if (error.code === 'P2002') {
+            logErrorToFile(error, `Creating card sales for card ${card.id} at ${card.orderDate}`);
+            return null;
+        }
+        // For any other error, we should log it and rethrow
+        logErrorToFile(error, `Creating card sales for card ${card.id} at ${card.orderDate}`);
+        throw error;
+    }
 }
 
 export async function createNewCards(cards: NewCard[]): Promise<void> {

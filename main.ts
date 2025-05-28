@@ -10,7 +10,7 @@ import {
     clearDatabase,
     createNewCards,
     createSet,
-    getAllCardsBySetId,
+    getAllCardsByGroupId,
     getSetByGroupId,
 } from './utils/db';
 import { formatSet, printError, printMessage, printSetDetails } from './utils/displayUtils';
@@ -197,7 +197,7 @@ async function addCardsToDatabase(set: TCGCSV.Set): Promise<void> {
 }
 
 async function fetchSetPrices() {
-    const allCards = await getAllCardsBySetId(34);
+    const allCards = await getAllCardsByGroupId(23874);
     // Create an array that just contains the item at index 0 from allCards
     const cards = [allCards[0]];
 
@@ -205,7 +205,7 @@ async function fetchSetPrices() {
 }
 
 async function listSets(): Promise<void> {
-    await clearDatabase();
+    // await clearDatabase();
     // Make a request to the TCGCSV API to get all the sets
     const allMTGSets = await fetchMTGSets();
     // Display all the sets to the user and capture the selected set
