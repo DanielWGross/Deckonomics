@@ -7,16 +7,46 @@ import { createCardSales } from './db';
 const MIN_DELAY = 200;
 const MAX_DELAY = 800;
 
-async function humanDelay(min = MIN_DELAY, max = MAX_DELAY) {
+interface SalesRecord {
+    orderDate: string;
+    shippingPrice: number;
+    purchasePrice: number;
+    quantity: number;
+}
+
+function getOldestSale(arr: SalesRecord[]): SalesRecord {
+    return arr.reduce((oldest, current) =>
+        new Date(oldest.orderDate) < new Date(current.orderDate) ? oldest : current
+    );
+}
+
+async function openSalesHistoryModal(page: Page): Promise<void> {
+    await humanDelay(300, 600);
+    await page.waitForSelector('div.modal__activator');
+    await page.click('div.modal__activator', { delay: Math.floor(Math.random() * 100) });
+}
+
+async function saveResultsToFile(card: Card, sales: SalesRecord[]): Promise<void> {
+    const outDir = path.resolve(process.cwd(), 'output');
+    await fs.mkdir(outDir, { recursive: true });
+    const filename = `sales-${card.productId}.json`;
+    const filePath = path.join(outDir, filename);
+    await fs.writeFile(filePath, JSON.stringify(sales, null, 2), 'utf8');
+    console.log(`💾 Wrote ${sales.length} records to ${filePath}`);
+}
+
+async function humanDelay(min = MIN_DELAY, max = MAX_DELAY): Promise<void> {
     const ms = Math.floor(Math.random() * (max - min + 1)) + min;
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function isLatestSalesResponse(response: any, latestSalesEndpoint: string): boolean {
     const req = response.request();
-    if (req.url() !== latestSalesEndpoint) {
+    if (!req.url().startsWith(latestSalesEndpoint)) {
         return false;
     }
+
+    console.log('🔍 Checking response for latest sales:', req.url());
 
     try {
         const postData = JSON.parse(req.postData()!);
@@ -28,9 +58,13 @@ function isLatestSalesResponse(response: any, latestSalesEndpoint: string): bool
 }
 
 export async function scrapeSetPrices(cards: Card[]): Promise<void> {
+    const alreadyScraped = new Set<number>();
+
     const cluster = await Cluster.launch({
         concurrency: Cluster.CONCURRENCY_CONTEXT,
-        maxConcurrency: 1,
+        maxConcurrency: 2,
+        retryLimit: 3,
+        retryDelay: 1000,
         puppeteerOptions: {
             headless: false,
             devtools: true,
@@ -39,14 +73,26 @@ export async function scrapeSetPrices(cards: Card[]): Promise<void> {
         },
     });
 
+    cluster.on('taskerror', (err, data, willRetry) => {
+        console.log(
+            `Task failed for ${JSON.stringify(data)}: ${err.message}` +
+                (willRetry ? ' — retrying…' : ' — no more retries left.')
+        );
+    });
+
     await cluster.task(async ({ page, data: card }) => {
         const cardData: Card = card as unknown as Card;
-        const latestSalesEndpoint = `https://mpapi.tcgplayer.com/v2/product/${cardData.productId}/latestsales?mpfev=3691`;
+        if (alreadyScraped.has(cardData.id)) {
+            console.log(`🛑 Skipping already scraped card: ${cardData.productName}`);
+            return;
+        }
+        alreadyScraped.add(cardData.id);
+        const latestSalesEndpoint = `https://mpapi.tcgplayer.com/v2/product/${cardData.productId}/latestsales?mpfev`;
 
         console.log(
             `🤖 Scraping Card: ${cardData.productName} Condition: ${cardData.condition} Printing: ${cardData.printing}`
         );
-        const salesResults: any[] = [];
+        const salesResults: SalesRecord[] = [];
 
         const salesResponsePromise = page.waitForResponse(
             (response) => isLatestSalesResponse(response, latestSalesEndpoint),
@@ -57,9 +103,7 @@ export async function scrapeSetPrices(cards: Card[]): Promise<void> {
         await page.goto(url, { waitUntil: 'networkidle2' });
         const salesResponse = await salesResponsePromise;
         const data = await salesResponse.json();
-
-        const salesData = data.data;
-
+        const salesData: SalesRecord[] = data.data;
         for (const sale of salesData) {
             salesResults.push(sale);
             await createCardSales({
@@ -71,25 +115,14 @@ export async function scrapeSetPrices(cards: Card[]): Promise<void> {
             });
         }
 
-        await humanDelay(300, 600);
-        await page.waitForSelector('div.modal__activator');
-        await page.click('div.modal__activator', { delay: Math.floor(Math.random() * 100) });
+        await openSalesHistoryModal(page);
 
-        // 3️⃣ Define a helper to extract the oldest record
-        const getOldest = (arr: any[]) =>
-            arr.reduce((oldest, current) =>
-                new Date(oldest.orderDate) < new Date(current.orderDate) ? oldest : current
-            );
-
-        // 4️⃣ Set threshold date (7 days ago)
         const threshold = new Date();
         threshold.setDate(threshold.getDate() - 7);
 
-        // Compute current oldest
-        let oldestRecord = getOldest(salesResults);
+        let oldestRecord = getOldestSale(salesResults);
         console.log(`🔍 Current oldest: ${oldestRecord.orderDate}`);
 
-        // 5️⃣ Loop: click Load More until oldest is >= 30 days ago
         while (new Date(oldestRecord.orderDate) > threshold) {
             console.log('🌀 Loading more sales...');
 
@@ -114,11 +147,11 @@ export async function scrapeSetPrices(cards: Card[]): Promise<void> {
             });
 
             const moreResponse = await morePromise;
-            const moreData = await moreResponse.json();
+            const moreData: { data: SalesRecord[] } = await moreResponse.json();
             salesResults.push(...moreData.data);
             console.log(`✅ Loaded ${moreData.data.length} more records`);
 
-            oldestRecord = getOldest(salesResults);
+            oldestRecord = getOldestSale(salesResults);
             console.log(`🔍 New oldest: ${oldestRecord.orderDate}`);
         }
 
@@ -128,30 +161,16 @@ export async function scrapeSetPrices(cards: Card[]): Promise<void> {
         console.log(`🔢 Total records collected: ${salesResults.length}`);
 
         try {
-            // once salesResults is complete:
-            const outDir = path.resolve(process.cwd(), 'output');
-            await fs.mkdir(outDir, { recursive: true });
-
-            // use the productId (or name) so each card gets its own file
-            const filename = `sales-${cardData.productId}.json`;
-            const filePath = path.join(outDir, filename);
-
-            console.log('Writing JSON to:', filePath);
-
-            // pretty-print with 2-space indent
-            await fs.writeFile(filePath, JSON.stringify(salesResults, null, 2), 'utf8');
-            console.log(`💾 Wrote ${salesResults.length} records to ${filePath}`);
+            await saveResultsToFile(cardData, salesResults);
         } catch (error) {
             console.error('Error writing JSON to file:', error);
         }
     });
 
-    // 6. Queue up all URLs
     for (const card of cards) {
         cluster.queue(card);
     }
 
-    // 7. Run the cluster
     await cluster.idle();
     await cluster.close();
 }

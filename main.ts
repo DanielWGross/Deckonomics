@@ -199,9 +199,9 @@ async function addCardsToDatabase(set: TCGCSV.Set): Promise<void> {
 async function fetchSetPrices() {
     const allCards = await getAllCardsByGroupId(23874);
     // Create an array that just contains the item at index 0 from allCards
-    const cards = [allCards[0]];
+    // const cards = [allCards[0]];
 
-    await scrapeSetPrices(cards);
+    await scrapeSetPrices(allCards);
 }
 
 async function listSets(): Promise<void> {
@@ -224,7 +224,7 @@ async function listSets(): Promise<void> {
         ]);
 
         if (!confirm) {
-            addCardsToDatabase(selectedSet);
+            await addCardsToDatabase(selectedSet);
         } else {
             // Create new set
             const newSet = await createSet({
