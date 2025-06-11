@@ -221,7 +221,10 @@ async function fetchSetPrices(): Promise<void> {
         return;
     }
 
-    const cards = allCards.cards;
+    // const cards = allCards.cards;
+    // filter this to only include cards that have 0 sales
+    const cards = allCards.cards.filter((card) => card.sales.length === 0);
+    // console.log('🚀 ~ fetchSetPrices ~ cards:', cards.length);
     // const cards = allCards.cards.slice(98);
     try {
         await scrapeSetPrices(cards);

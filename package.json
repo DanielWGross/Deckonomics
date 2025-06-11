@@ -14,7 +14,8 @@
         "lint": "eslint . --ext .ts",
         "lint:fix": "eslint . --ext .ts --fix",
         "build": "tsc",
-        "start": "npm run prisma:generate && tsx main.ts"
+        "start": "npm run prisma:generate && tsx main.ts",
+        "scrape": "tsx scrape.ts"
     },
     "dependencies": {
         "@prisma/client": "^6.6.0",

@@ -37,12 +37,16 @@ export async function getSetWithCardsByGroupId(groupId: number): Promise<SetWith
     return set;
 }
 
-export async function getAllCardsByGroupId(
-    groupId: number
-): Promise<(Set & { cards: Card[] }) | undefined> {
+export async function getAllCardsByGroupId(groupId: number): Promise<SetWithCards | undefined> {
     const set = await prisma.set.findUnique({
         where: { groupId },
-        include: { cards: true },
+        include: {
+            cards: {
+                include: {
+                    sales: true,
+                },
+            },
+        },
     });
 
     if (!set) {
