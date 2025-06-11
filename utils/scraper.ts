@@ -1,7 +1,7 @@
 import { Card } from '../generated/prisma';
 import { Cluster } from 'puppeteer-cluster';
 import { createCardSales } from './db';
-import { Page } from 'puppeteer';
+import { Page, HTTPResponse } from 'puppeteer';
 
 const MIN_DELAY = 200;
 const MAX_DELAY = 800;
@@ -21,7 +21,7 @@ function getOldestSale(arr: SalesRecord[]): SalesRecord {
 
 async function openSalesHistoryModal(page: Page): Promise<void> {
     await humanDelay(300, 600);
-    await page.waitForSelector('div.modal__activator');
+    await page.waitForSelector('div.modal__activator', { timeout: 28000 }); // Modal selector timeout
     await page.click('div.modal__activator', { delay: Math.floor(Math.random() * 100) });
 }
 
@@ -30,7 +30,7 @@ async function humanDelay(min = MIN_DELAY, max = MAX_DELAY): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isLatestSalesResponse(response: any, latestSalesEndpoint: string): boolean {
+function isLatestSalesResponse(response: HTTPResponse, latestSalesEndpoint: string): boolean {
     const req = response.request();
     if (!req.url().startsWith(latestSalesEndpoint)) {
         return false;
@@ -45,18 +45,47 @@ function isLatestSalesResponse(response: any, latestSalesEndpoint: string): bool
     }
 }
 
+// Helper function to check if error is recoverable
+function isRecoverableError(err: unknown): boolean {
+    if (!(err instanceof Error)) return false;
+
+    return (
+        err.message.includes('timeout') ||
+        err.message.includes('waiting') ||
+        err.message.includes('Protocol error') ||
+        err.message.includes('Navigation timeout') ||
+        err.message.includes('Page closed') ||
+        err.message.includes('Target closed') ||
+        err.message.includes('TargetCloseError')
+    );
+}
+
 export async function scrapeSetPrices(cards: Card[]): Promise<void> {
+    // Track already scraped cards to avoid duplicates
+    const alreadyScraped = new Set<number>();
+
     try {
         const cluster = await Cluster.launch({
-            concurrency: Cluster.CONCURRENCY_PAGE,
+            concurrency: Cluster.CONCURRENCY_CONTEXT,
             maxConcurrency: 1,
-            retryLimit: 3,
+            retryLimit: 0, // Handle retries manually
             retryDelay: 1000,
             puppeteerOptions: {
                 headless: false,
-                devtools: true,
-                args: ['--auto-open-devtools-for-tabs', '--window-size=960,540'],
-                slowMo: 50,
+                devtools: false,
+                args: [
+                    '--window-size=800,600',
+                    '--window-position=-700,-500', // Position mostly off screen
+                    '--disable-background-tab-freeze',
+                    '--disable-backgrounding-occluded-windows',
+                    '--disable-renderer-backgrounding',
+                    '--no-first-run',
+                    '--disable-default-apps',
+                    '--disable-popup-blocking',
+                ],
+                // args: ['--auto-open-devtools-for-tabs', '--window-size=960,540'],
+                // args: ['--no-sandbox', '--disable-setuid-sandbox'],
+                // slowMo: 50,
             },
         });
 
@@ -69,31 +98,117 @@ export async function scrapeSetPrices(cards: Card[]): Promise<void> {
 
         await cluster.task(async ({ page, data: card }) => {
             const cardData: Card = card as unknown as Card;
-            const index = (card as any).__index ?? 0;
-            const total = (card as any).__total ?? 1;
+            const index = ((card as Record<string, unknown>).__index as number) ?? 0;
+            const total = ((card as Record<string, unknown>).__total as number) ?? 1;
             const percent = (((index + 1) / total) * 100).toFixed(1);
-            const attempt = (card as any).__attempt ?? 1;
-
+            const attempt = ((card as Record<string, unknown>).__attempt as number) ?? 1;
             const maxAttempts = 3;
+
+            // Skip if already scraped
+            if (alreadyScraped.has(cardData.tcgPlayerId)) {
+                console.log(
+                    `🛑 Skipping already scraped card: ${cardData.productName} (${cardData.tcgPlayerId})`
+                );
+                return;
+            }
+
+            // Early check if page is closed before any operations
+            if (page.isClosed()) {
+                console.log('🔄 Page is closed before starting, re-queuing card');
+                if (attempt < maxAttempts) {
+                    cluster.queue({
+                        ...card,
+                        __attempt: attempt + 1,
+                        __index: index,
+                        __total: total,
+                    });
+                } else {
+                    console.error(
+                        `❌ Max attempts reached for ${cardData.productName} - giving up`
+                    );
+                }
+                return;
+            }
+
+            // Prevent focus stealing - wrapped in try/catch to handle closed pages
+            try {
+                await page.evaluate(() => {
+                    if (typeof window !== 'undefined') {
+                        (window as any).blur();
+                    }
+                });
+            } catch (err: unknown) {
+                // If page is closed during focus prevention, re-queue
+                if (page.isClosed()) {
+                    console.log('🔄 Page closed during focus prevention, re-queuing');
+                    if (attempt < maxAttempts) {
+                        cluster.queue({
+                            ...card,
+                            __attempt: attempt + 1,
+                            __index: index,
+                            __total: total,
+                        });
+                    }
+                    return;
+                }
+                console.warn('Warning: Could not prevent focus stealing');
+            }
 
             try {
                 const latestSalesEndpoint = `https://mpapi.tcgplayer.com/v2/product/${cardData.productId}/latestsales?mpfev`;
 
                 console.log(
-                    `🤖 Scraping Card: ${cardData.productName} TCGPlayer ID: ${cardData.tcgPlayerId} Condition: ${cardData.condition} Printing: ${cardData.printing} — ${index + 1}/${total} (${percent}%) complete`
+                    `🤖 Scraping Card: ${cardData.productName} TCGPlayer ID: ${cardData.tcgPlayerId} Condition: ${cardData.condition} Printing: ${cardData.printing} — ${index + 1}/${total} (${percent}%) complete (attempt ${attempt})`
                 );
                 const salesResults: SalesRecord[] = [];
 
+                // Check if page is still usable before proceeding
+                if (page.isClosed()) {
+                    throw new Error('Page closed before navigation');
+                }
+
                 const salesResponsePromise = page.waitForResponse(
                     (response) => isLatestSalesResponse(response, latestSalesEndpoint),
-                    { timeout: 30000 }
+                    { timeout: 43000 } // Initial sales response timeout
                 );
 
-                const url = `${cardData.productUrl}?Language=English&Condition=Near+Mint&Printing=Normal`;
-                await page.goto(url, { waitUntil: 'networkidle2' });
-                const salesResponse = await salesResponsePromise;
+                const url = `${cardData.productUrl}?Language=English&Condition=Near+Mint&Printing=${cardData.printing === 'FOIL' ? 'Foil' : 'Normal'}`;
+
+                // Wrap navigation in try-catch to handle page closure during navigation
+                try {
+                    await page.goto(url, {
+                        waitUntil: 'networkidle2',
+                        timeout: 32000, // Navigation timeout
+                    });
+                } catch (navErr: unknown) {
+                    // Check if page was closed during navigation
+                    if (page.isClosed()) {
+                        throw new Error('Page closed during navigation');
+                    }
+                    // Re-throw navigation errors for retry logic
+                    throw navErr;
+                }
+
+                // Check if page is still usable after navigation
+                if (page.isClosed()) {
+                    throw new Error('Page closed after navigation');
+                }
+
+                // Wrap response handling in try-catch
+                let salesResponse;
+                try {
+                    salesResponse = await salesResponsePromise;
+                } catch (responseErr: unknown) {
+                    // Check if page was closed while waiting for response
+                    if (page.isClosed()) {
+                        throw new Error('Page closed while waiting for sales response');
+                    }
+                    throw responseErr;
+                }
+
                 const data = await salesResponse.json();
                 const salesData: SalesRecord[] = data.data;
+
                 for (const sale of salesData) {
                     salesResults.push(sale);
                     await createCardSales({
@@ -105,15 +220,24 @@ export async function scrapeSetPrices(cards: Card[]): Promise<void> {
                     });
                 }
 
+                // Check if page is still usable before opening modal
+                if (page.isClosed()) {
+                    throw new Error('Page closed before opening modal');
+                }
+
                 await openSalesHistoryModal(page);
 
                 const threshold = new Date();
                 threshold.setDate(threshold.getDate() - 7);
-
                 let oldestRecord = getOldestSale(salesResults);
 
                 while (new Date(oldestRecord.orderDate) > threshold) {
                     try {
+                        // Check if page is still usable before each "load more" operation
+                        if (page.isClosed()) {
+                            throw new Error('Page closed during load more operations');
+                        }
+
                         const morePromise = page.waitForResponse(
                             (response) => {
                                 const req = response.request();
@@ -129,12 +253,26 @@ export async function scrapeSetPrices(cards: Card[]): Promise<void> {
                                     return false;
                                 }
                             },
-                            { timeout: 30000 }
+                            { timeout: 47000 } // Load more response timeout
                         );
+
                         await humanDelay(300, 600);
+
+                        // Check page state before waiting for selector
+                        if (page.isClosed()) {
+                            throw new Error('Page closed before waiting for load more button');
+                        }
+
                         await page.waitForSelector(
-                            'button.sales-history-snapshot__load-more__button'
+                            'button.sales-history-snapshot__load-more__button',
+                            { timeout: 26000 } // Load more button selector timeout
                         );
+
+                        // Check page state before clicking
+                        if (page.isClosed()) {
+                            throw new Error('Page closed before clicking load more button');
+                        }
+
                         await page.click('button.sales-history-snapshot__load-more__button', {
                             delay: Math.floor(Math.random() * 100),
                         });
@@ -155,36 +293,44 @@ export async function scrapeSetPrices(cards: Card[]): Promise<void> {
                         }
 
                         oldestRecord = getOldestSale(salesResults);
-                    } catch (err) {
+                    } catch (innerErr) {
+                        // ❌ REMOVE re-queuing logic from here
                         console.error(
-                            `❌ Error on attempt ${attempt} for card ${cardData.productName}:`,
-                            err
+                            `❌ Error loading more sales for ${cardData.productName}:`,
+                            innerErr
                         );
-                        if (attempt < maxAttempts) {
-                            console.log(
-                                `🔄 Re-queuing card for retry (${attempt + 1}/${maxAttempts})`
-                            );
-                            cluster.queue({ ...card, __attempt: attempt + 1 });
-                        } else {
-                            console.error(
-                                `🚫 Failed to scrape card ${cardData.productName} after ${maxAttempts} attempts.`
-                            );
-                        }
+                        // Just break out of the while loop and let the outer catch handle retry
+                        break;
                     }
                 }
 
                 console.log(`✅ Success! Total records collected: ${salesResults.length}`);
-            } catch (err) {
+
+                // Mark card as successfully scraped
+                alreadyScraped.add(cardData.tcgPlayerId);
+            } catch (err: unknown) {
                 console.error(
                     `❌ Error on attempt ${attempt} for card ${cardData.productName}:`,
                     err
                 );
-                if (attempt < maxAttempts) {
+
+                // Check if this is a recoverable error and we haven't exceeded max attempts
+                if (attempt < maxAttempts && isRecoverableError(err)) {
                     console.log(`🔄 Re-queuing card for retry (${attempt + 1}/${maxAttempts})`);
-                    cluster.queue({ ...card, __attempt: attempt + 1 });
+
+                    // Wait 3 seconds before retry
+                    await new Promise((resolve) => setTimeout(resolve, 3000));
+
+                    // Re-queue with updated attempt counter - cluster will create new context if needed
+                    cluster.queue({
+                        ...card,
+                        __attempt: attempt + 1,
+                        __index: index,
+                        __total: total,
+                    });
                 } else {
                     console.error(
-                        `🚫 Failed to scrape card ${cardData.productName} after ${maxAttempts} attempts.`
+                        `🚫 Failed to scrape card ${cardData.productName} after ${maxAttempts} attempts or unrecoverable error.`
                     );
                 }
             }

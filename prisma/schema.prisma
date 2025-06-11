@@ -8,30 +8,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum Rarity {
-  C // Common
-  L // Land
-  M // Mythic
-  P // Promo
-  R // Rare
-  S // Special
-  T // Token
-  U // Uncommon
-}
-
-enum Condition {
-  NM // Near Mint
-  LP // Lightly Played
-  MP // Moderately Played
-  HP // Heavily Played
-  DM // Damaged
-}
-
-enum Printing {
-  NORMAL
-  FOIL
-}
-
 model Set {
   id             Int      @id @default(autoincrement())
   groupId        Int      @unique
@@ -41,15 +17,14 @@ model Set {
   publishedOn    DateTime
   modifiedOn     DateTime
   categoryId     Int
-  cards          Card[]
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+  cards          Card[]
 }
 
 model Card {
   id          Int         @id @default(autoincrement())
   tcgPlayerId Int         @unique
-  set         Set         @relation(fields: [setId], references: [id])
   setId       Int
   productName String
   productId   Int
@@ -58,15 +33,15 @@ model Card {
   rarity      Rarity
   condition   Condition
   printing    Printing
-  sales       CardSales[]
-  price       CardPrice?
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
+  set         Set         @relation(fields: [setId], references: [id])
+  price       CardPrice?
+  sales       CardSales[]
 }
 
 model CardSales {
   id            Int      @id @default(autoincrement())
-  card          Card     @relation(fields: [cardId], references: [id])
   cardId        Int
   orderDate     DateTime @default(now())
   shippingPrice Float
@@ -74,22 +49,45 @@ model CardSales {
   quantity      Int
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  card          Card     @relation(fields: [cardId], references: [id])
 
   @@unique([cardId, orderDate])
   @@index([cardId, orderDate])
 }
 
 model CardPrice {
-  id            Int     @id @default(autoincrement())
-  card          Card    @relation(fields: [cardId], references: [id])
-  cardId        Int
-  p90Price      Float
-  p95Price      Float
-  p100Price     Float
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id        Int      @id @default(autoincrement())
+  cardId    Int      @unique
+  p90Price  Float
+  p95Price  Float
+  p100Price Float
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  card      Card     @relation(fields: [cardId], references: [id])
 
-  @@unique([cardId])
   @@index([cardId])
 }
 
+enum Rarity {
+  C
+  L
+  M
+  P
+  R
+  S
+  T
+  U
+}
+
+enum Condition {
+  NM
+  LP
+  MP
+  HP
+  DM
+}
+
+enum Printing {
+  NORMAL
+  FOIL
+}

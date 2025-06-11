@@ -221,8 +221,8 @@ async function fetchSetPrices(): Promise<void> {
         return;
     }
 
-    // const cards = allCards.cards
-    const cards = allCards.cards.slice(570);
+    const cards = allCards.cards;
+    // const cards = allCards.cards.slice(98);
     try {
         await scrapeSetPrices(cards);
     } catch (error) {

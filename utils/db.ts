@@ -4,7 +4,7 @@ import type { Card, CardSales, Set } from '../generated/prisma';
 import { PrismaClient } from '../generated/prisma';
 import { TCGCSV } from '../types/tcgcsv';
 import { printError, printMessage } from './displayUtils';
-import { NewCard, SetWithCards } from '../types/types';
+import { NewCard, SetWithCards, CardWithSales } from '../types/types';
 
 const prisma = new PrismaClient();
 
@@ -52,7 +52,7 @@ export async function getAllCardsByGroupId(
     return set;
 }
 
-export async function getCardsWithMoreThan25Sales(): Promise<Card[]> {
+export async function getCardsWithMoreThan25Sales(): Promise<CardWithSales[]> {
     const cards = await prisma.card.findMany({
         where: {
             sales: {

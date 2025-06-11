@@ -4,6 +4,46 @@ import * as ss from 'simple-statistics';
 import { getSetWithCardsByGroupId } from './db';
 import { CardWithSales, SetWithCards } from '../types/types';
 
+function getPriceTrend(salesData: { orderDate: string; purchasePrice: number }[]): {
+    trend: 'up' | 'down' | 'sideways';
+    slope: number;
+    confidence: number;
+} {
+    if (salesData.length < 2) {
+        return { trend: 'sideways', slope: 0, confidence: 0 };
+    }
+
+    // Convert to (time, price) points, sorted by date
+    const points = salesData
+        .map((sale) => [new Date(sale.orderDate).getTime(), sale.purchasePrice] as [number, number])
+        .sort((a, b) => a[0] - b[0]); // Sort by timestamp
+
+    // Calculate linear regression
+    const regression = ss.linearRegression(points);
+    const slope = regression.m; // This is the trend slope (price change per millisecond)
+    const rSquared = ss.rSquared(points, ss.linearRegressionLine(regression));
+
+    // Calculate average price for threshold calculation
+    const avgPrice = ss.mean(salesData.map((sale) => sale.purchasePrice));
+
+    // Calculate 5% threshold per day
+    const fivePercentThreshold = (avgPrice * 0.05) / (1000 * 60 * 60 * 24); // 5% per day in price change per millisecond
+
+    let trend: 'up' | 'down' | 'sideways';
+    if (slope > fivePercentThreshold) {
+        trend = 'up';
+    } else if (slope < -fivePercentThreshold) {
+        trend = 'down';
+    } else {
+        trend = 'sideways';
+    }
+
+    return {
+        trend,
+        slope: slope * (1000 * 60 * 60 * 24), // Convert to price change per day
+        confidence: rSquared, // R² value (0-1, higher = more reliable trend)
+    };
+}
 export async function getSetCards(groupId: number): Promise<SetWithCards['cards']> {
     try {
         const set = await getSetWithCardsByGroupId(groupId);
@@ -41,6 +81,7 @@ function theoreticalPercentile(min: number, max: number, percentile: number): nu
 
 function getCardPrice(card: CardWithSales): any {
     const allCardSales = card.sales.map((sale) => sale.purchasePrice);
+
     const cardSales = allCardSales.filter((price) => price < 0.5);
     // const quant100 = interpolateSorted(
     //     [...cardSales].sort((a, b) => a - b),
@@ -94,6 +135,8 @@ function getCardPrice(card: CardWithSales): any {
     const p95 = theoreticalPercentile(min, max, 0.95);
     console.log('🚀 ~ getCardPrice ~ p95:', p95);
 
+    const priceTrend = getPriceTrend(card.sales as any);
+    console.log('🚀 ~ getCardPrice ~ priceTrend:', priceTrend);
     // const quantile25 = ss.quantile(cardSales, 0.25);
     // const quantile50 = ss.quantile(cardSales, 0.25);
     // const quantile75 = ss.quantile(cardSales, 0.25);
@@ -127,7 +170,7 @@ function getCardPrice(card: CardWithSales): any {
     //     );
 }
 
-export async function generatePrices(groupId: number): any {
+export async function generatePrices(groupId: number): Promise<void> {
     const cards = await getSetCards(groupId);
     const firstCard = cards[0];
     getCardPrice(firstCard);
