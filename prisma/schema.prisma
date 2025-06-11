@@ -59,6 +59,7 @@ model Card {
   condition   Condition
   printing    Printing
   sales       CardSales[]
+  price       CardPrice?
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 }
@@ -77,3 +78,18 @@ model CardSales {
   @@unique([cardId, orderDate])
   @@index([cardId, orderDate])
 }
+
+model CardPrice {
+  id            Int     @id @default(autoincrement())
+  card          Card    @relation(fields: [cardId], references: [id])
+  cardId        Int
+  p90Price      Float
+  p95Price      Float
+  p100Price     Float
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([cardId])
+  @@index([cardId])
+}
+

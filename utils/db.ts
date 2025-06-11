@@ -1,10 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { Card, Set } from '../generated/prisma';
+import type { Card, CardSales, Set } from '../generated/prisma';
 import { PrismaClient } from '../generated/prisma';
 import { TCGCSV } from '../types/tcgcsv';
 import { printError, printMessage } from './displayUtils';
-import { NewCard } from '../types/types';
+import { NewCard, SetWithCards } from '../types/types';
 
 const prisma = new PrismaClient();
 
@@ -19,21 +19,56 @@ function logErrorToFile(error: any, context: string): void {
     const errorMessage = `[${timestamp}] Error in ${context}: ${error instanceof Error ? error.message : String(error)}\n`;
 
     fs.appendFileSync(errorLogPath, errorMessage);
+    fs.appendFileSync(errorLogPath, '\n-------------------------------\n');
 }
 
 export const db = prisma;
 
-export async function getAllCardsByGroupId(groupId: number): Promise<Card[]> {
+export async function getSetWithCardsByGroupId(groupId: number): Promise<SetWithCards | undefined> {
+    const set = await prisma.set.findUnique({
+        where: { groupId },
+        include: { cards: { include: { sales: true } } },
+    });
+
+    if (!set) {
+        return undefined;
+    }
+
+    return set;
+}
+
+export async function getAllCardsByGroupId(
+    groupId: number
+): Promise<(Set & { cards: Card[] }) | undefined> {
     const set = await prisma.set.findUnique({
         where: { groupId },
         include: { cards: true },
     });
 
     if (!set) {
-        return [];
+        return undefined;
     }
 
-    return set.cards;
+    return set;
+}
+
+export async function getCardsWithMoreThan25Sales(): Promise<Card[]> {
+    const cards = await prisma.card.findMany({
+        where: {
+            sales: {
+                some: {}, // at least one sale, but we will filter by count below
+            },
+        },
+        include: {
+            sales: true,
+        },
+    });
+
+    // Filter in JS since Prisma does not support having/count in where yet
+    const filteredCards = cards.filter((card) => card.sales.length > 25);
+    // Sort the filtered cards array so the ones with the most sales come first
+    filteredCards.sort((a, b) => b.sales.length - a.sales.length);
+    return filteredCards;
 }
 
 export async function getAllCardsById(setId: number): Promise<Card[]> {
@@ -62,6 +97,16 @@ export async function deleteSet(groupId: number): Promise<void> {
     await prisma.set.delete({
         where: { groupId },
     });
+}
+
+export async function getCardSalesByCardId(cardId: number): Promise<CardSales[]> {
+    return prisma.cardSales.findMany({
+        where: { cardId },
+    });
+}
+
+export async function deleteCardSales(): Promise<void> {
+    await prisma.cardSales.deleteMany();
 }
 
 export async function createSet(set: TCGCSV.Set): Promise<Set> {
@@ -94,7 +139,7 @@ export async function createCardSales(card: any): Promise<any> {
     } catch (error: any) {
         // If the error is a unique constraint violation, we'll just skip it
         if (error.code === 'P2002') {
-            logErrorToFile(error, `Creating card sales for card ${card.id} at ${card.orderDate}`);
+            // logErrorToFile(error, `Creating card sales for card ${card.id} at ${card.orderDate}`);
             return null;
         }
         // For any other error, we should log it and rethrow

@@ -7,14 +7,16 @@ import { Rarity } from './generated/prisma';
 import { TCGCSV } from './types/tcgcsv';
 import { MenuOption, NewCard } from './types/types';
 import {
-    clearDatabase,
     createNewCards,
     createSet,
     getAllCardsByGroupId,
     getSetByGroupId,
+    deleteCardSales,
+    getCardsWithMoreThan25Sales,
 } from './utils/db';
 import { formatSet, printError, printMessage, printSetDetails } from './utils/displayUtils';
 import { scrapeSetPrices } from './utils/scraper';
+import { generatePrices } from './utils/priceStats';
 
 type TCGPlayerCard = {
     'TCGplayer Id': string;
@@ -34,6 +36,19 @@ type TCGPlayerCard = {
     'TCG Marketplace Price': string;
     'Photo URL': string;
 };
+
+async function generateSetPrices(): Promise<void> {
+    const result = await generatePrices(23874);
+}
+
+async function deleteAllCardSales(): Promise<void> {
+    try {
+        await deleteCardSales();
+        printMessage('Successfully deleted all card sales', 'green');
+    } catch (error) {
+        printError('Error deleting card sales', error);
+    }
+}
 
 async function getTCGPlayerCards(csvPath: string): Promise<TCGPlayerCard[]> {
     try {
@@ -101,11 +116,13 @@ async function showMainMenu(): Promise<MenuOption> {
             name: 'action',
             message: 'What would you like to do?',
             choices: [
+                { name: 'Get Test Card Sales', value: MenuOption.GetTestCardSales },
                 { name: 'List Sets', value: MenuOption.ListSets },
                 { name: 'Add Set', value: MenuOption.AddSet },
                 { name: 'Generate Set Data', value: MenuOption.GenerateSetData },
                 { name: 'Generate Set Prices', value: MenuOption.GenerateSetPrices },
                 { name: 'Fetch Set Prices', value: MenuOption.FetchSetPrices },
+                { name: 'Delete Card Sales', value: MenuOption.DeleteCardSales },
             ],
         },
     ]);
@@ -196,12 +213,34 @@ async function addCardsToDatabase(set: TCGCSV.Set): Promise<void> {
     }
 }
 
-async function fetchSetPrices() {
+async function fetchSetPrices(): Promise<void> {
     const allCards = await getAllCardsByGroupId(23874);
     // Create an array that just contains the item at index 0 from allCards
     // const cards = [allCards[0]];
+    if (allCards == undefined) {
+        return;
+    }
 
-    await scrapeSetPrices(allCards);
+    // const cards = allCards.cards
+    const cards = allCards.cards.slice(570);
+    try {
+        await scrapeSetPrices(cards);
+    } catch (error) {
+        printError('Error scraping set prices:', error);
+    }
+}
+
+async function getTestCardSales(): Promise<void> {
+    const cards = await getCardsWithMoreThan25Sales();
+
+    // loop through the first 10 cards and print out the card name
+    for (let i = 0; i < 30; i++) {
+        const card = cards[i];
+        printMessage(
+            `${card.productName} (${card.printing}) - ${card.sales.length} copie(s)`,
+            'green'
+        );
+    }
 }
 
 async function listSets(): Promise<void> {
@@ -285,10 +324,19 @@ async function main(): Promise<void> {
                 break;
             case MenuOption.GenerateSetPrices:
                 printMessage('\n== Generate Set Prices ==\n');
+                await generateSetPrices();
                 break;
             case MenuOption.FetchSetPrices:
                 printMessage('\n== Fetch Set Prices ==\n');
                 await fetchSetPrices();
+                break;
+            case MenuOption.DeleteCardSales:
+                printMessage('\n== Delete Card Sales ==\n');
+                await deleteAllCardSales();
+                break;
+            case MenuOption.GetTestCardSales:
+                printMessage('\n== Get Test Card Sales ==\n');
+                await getTestCardSales();
                 break;
             default:
                 printError('Invalid option', 'Invalid option');
