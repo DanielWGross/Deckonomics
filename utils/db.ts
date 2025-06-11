@@ -13,7 +13,7 @@ if (!fs.existsSync(errorLogDir)) {
     fs.mkdirSync(errorLogDir);
 }
 
-function logErrorToFile(error: any, context: string): void {
+function logErrorToFile(error: unknown, context: string): void {
     const timestamp = new Date().toISOString();
     const errorLogPath = path.join(errorLogDir, 'card_creation_errors.log');
     const errorMessage = `[${timestamp}] Error in ${context}: ${error instanceof Error ? error.message : String(error)}\n`;
@@ -75,6 +75,46 @@ export async function getCardsWithMoreThan25Sales(): Promise<CardWithSales[]> {
     return filteredCards;
 }
 
+export async function getTop10CardsByRecentSales(): Promise<
+    (Card & { _count: { sales: number } })[]
+> {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const cards = await prisma.card.findMany({
+        where: {
+            sales: {
+                some: {
+                    orderDate: {
+                        gte: sevenDaysAgo,
+                    },
+                },
+            },
+        },
+        include: {
+            _count: {
+                select: {
+                    sales: {
+                        where: {
+                            orderDate: {
+                                gte: sevenDaysAgo,
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        orderBy: {
+            sales: {
+                _count: 'desc',
+            },
+        },
+        take: 10,
+    });
+
+    return cards;
+}
+
 export async function getAllCardsById(setId: number): Promise<Card[]> {
     return prisma.card.findMany({
         where: {
@@ -127,7 +167,13 @@ export async function createSet(set: TCGCSV.Set): Promise<Set> {
     });
 }
 
-export async function createCardSales(card: any): Promise<any> {
+export async function createCardSales(card: {
+    orderDate: string;
+    shippingPrice: number;
+    purchasePrice: number;
+    quantity: number;
+    id: number;
+}): Promise<CardSales | null> {
     try {
         return await prisma.cardSales.create({
             data: {
@@ -140,9 +186,9 @@ export async function createCardSales(card: any): Promise<any> {
                 },
             },
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         // If the error is a unique constraint violation, we'll just skip it
-        if (error.code === 'P2002') {
+        if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
             // logErrorToFile(error, `Creating card sales for card ${card.id} at ${card.orderDate}`);
             return null;
         }

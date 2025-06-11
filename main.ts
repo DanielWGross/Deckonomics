@@ -13,6 +13,7 @@ import {
     getSetByGroupId,
     deleteCardSales,
     getCardsWithMoreThan25Sales,
+    getTop10CardsByRecentSales,
 } from './utils/db';
 import { formatSet, printError, printMessage, printSetDetails } from './utils/displayUtils';
 import { scrapeSetPrices } from './utils/scraper';
@@ -117,6 +118,7 @@ async function showMainMenu(): Promise<MenuOption> {
             message: 'What would you like to do?',
             choices: [
                 { name: 'Get Test Card Sales', value: MenuOption.GetTestCardSales },
+                { name: 'Get Top 10 Cards by Recent Sales', value: MenuOption.GetTop10RecentSales },
                 { name: 'List Sets', value: MenuOption.ListSets },
                 { name: 'Add Set', value: MenuOption.AddSet },
                 { name: 'Generate Set Data', value: MenuOption.GenerateSetData },
@@ -246,6 +248,30 @@ async function getTestCardSales(): Promise<void> {
     }
 }
 
+async function getTop10RecentSales(): Promise<void> {
+    try {
+        const cards = await getTop10CardsByRecentSales();
+
+        if (cards.length === 0) {
+            printMessage('No cards found with sales in the last 7 days.', 'yellow');
+            return;
+        }
+
+        printMessage('\n=== Top 10 Cards by Sales (Last 7 Days) ===\n', 'yellow');
+
+        cards.forEach((card, index) => {
+            printMessage(
+                `${index + 1}. ${card.productName} (${card.printing}) - ${card._count.sales} sale(s)`,
+                'green'
+            );
+        });
+
+        printMessage(`\nTotal cards found: ${cards.length}`, 'gray');
+    } catch (error) {
+        printError('Error fetching top cards by recent sales:', error);
+    }
+}
+
 async function listSets(): Promise<void> {
     // await clearDatabase();
     // Make a request to the TCGCSV API to get all the sets
@@ -340,6 +366,10 @@ async function main(): Promise<void> {
             case MenuOption.GetTestCardSales:
                 printMessage('\n== Get Test Card Sales ==\n');
                 await getTestCardSales();
+                break;
+            case MenuOption.GetTop10RecentSales:
+                printMessage('\n== Get Top 10 Cards by Recent Sales ==\n');
+                await getTop10RecentSales();
                 break;
             default:
                 printError('Invalid option', 'Invalid option');

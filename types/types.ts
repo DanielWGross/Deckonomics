@@ -21,6 +21,7 @@ export const MenuOption = {
     FetchSetPrices: 'Fetch Set Prices',
     DeleteCardSales: 'Delete Card Sales',
     GetTestCardSales: 'Get Test Card Sales',
+    GetTop10RecentSales: 'Get Top 10 Cards by Recent Sales',
 } as const;
 
 export type MenuOption = (typeof MenuOption)[keyof typeof MenuOption];
